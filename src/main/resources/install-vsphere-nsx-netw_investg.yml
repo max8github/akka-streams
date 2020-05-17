@@ -1,0 +1,1211 @@
+jobs:
+  - name: claim-shepherd-lock
+    plan:
+      - get: pks-untested-tile
+        tags:
+          - VMware
+      - params:
+          action: create
+          lifetime: 86400
+          resource: environment-path
+          timeout: 86400
+        put: environment-lock
+        tags:
+          - VMware
+    serial: true
+  - name: sanity-check-testbed
+    on_failure:
+      params:
+        attachments:
+          - color: danger
+            text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+        channel: '#-dev-null'
+      put: notify
+      tags:
+        - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: pks-untested-tile
+              passed:
+                - claim-shepherd-lock
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: environment-lock
+              passed:
+                - claim-shepherd-lock
+              tags:
+                - VMware
+              trigger: true
+      - in_parallel:
+          steps:
+            - file: pks-releng-ci/tasks/ensure-empty-opsman/task.yml
+              privileged: true
+              tags:
+                - VMware
+              task: ensure-empty-opsman
+            - file: pks-releng-ci/tasks/validate-shepherd-lockfile/task.yml
+              params:
+                ENV_LOCK_FILE: environment-lock/metadata
+              privileged: true
+              task: validate-shepherd-lockfile
+    serial: true
+  - name: add-tile
+    on_failure:
+      do:
+        - params:
+            attachments:
+              - color: danger
+                text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+            channel: '#-dev-null'
+          put: notify
+          tags:
+            - VMware
+        - get: pipeline-metadata
+          tags:
+            - VMware
+        - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+          params:
+            GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+          tags:
+            - VMware
+          task: download-pks-cli
+        - file: pks-releng-ci/tasks/download-kubectl/task.yml
+          tags:
+            - VMware
+          task: download-kubectl
+        - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+          input_mapping:
+            tile: pks-untested-tile
+          tags:
+            - VMware
+          task: get-product-version-from-tile
+        - file: pks-releng-ci/tasks/gather-logs/task.yml
+          params:
+            ENV_LOCK_FILE: environment-lock/metadata
+            IAAS_TYPE: vsphere
+          privileged: true
+          tags:
+            - VMware
+          task: gather-logs
+        - params:
+            content_type: application/octet-stream
+            file: logs/*-logs.tar.gz
+          put: failure-logs
+          tags:
+            - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - sanity-check-testbed
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-untested-tile
+              passed:
+                - sanity-check-testbed
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: pks-releng-toolbox
+              tags:
+                - VMware
+            - get: ci-runner
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-toolbox/tasks/add-tile-to-opsman/task.yml
+            image: ci-runner
+            params:
+              ENV_LOCK_FILE: environment-lock/metadata
+              PIVNET_TOKEN: ((public-pivnet-token))
+            privileged: true
+            tags:
+              - VMware
+            task: add-tile-to-opsman
+        timeout: 1h
+    serial: true
+  - name: configure-tile-in-om
+    on_failure:
+      do:
+        - params:
+            attachments:
+              - color: danger
+                text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+            channel: '#-dev-null'
+          put: notify
+          tags:
+            - VMware
+        - get: pipeline-metadata
+          tags:
+            - VMware
+        - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+          params:
+            GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+          tags:
+            - VMware
+          task: download-pks-cli
+        - file: pks-releng-ci/tasks/download-kubectl/task.yml
+          tags:
+            - VMware
+          task: download-kubectl
+        - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+          input_mapping:
+            tile: pks-untested-tile
+          tags:
+            - VMware
+          task: get-product-version-from-tile
+        - file: pks-releng-ci/tasks/gather-logs/task.yml
+          params:
+            ENV_LOCK_FILE: environment-lock/metadata
+            IAAS_TYPE: vsphere
+          privileged: true
+          tags:
+            - VMware
+          task: gather-logs
+        - params:
+            content_type: application/octet-stream
+            file: logs/*-logs.tar.gz
+          put: failure-logs
+          tags:
+            - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - add-tile
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-untested-tile
+              passed:
+                - add-tile
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: pks-releng-toolbox
+              tags:
+                - VMware
+            - get: kubo-odb-ci
+              tags:
+                - VMware
+            - get: git-tile-pipeline
+              tags:
+                - VMware
+            - get: ci-runner
+              tags:
+                - VMware
+      - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+        input_mapping:
+          tile: pks-untested-tile
+        tags:
+          - VMware
+        task: get-product-version-from-tile
+      - file: pks-releng-toolbox/tasks/create-tile-configuration-new/task.yml
+        image: ci-runner
+        privileged: true
+        tags:
+          - VMware
+        task: create-tile-configuration
+      - file: pks-releng-ci/tasks/deploy-mountebank/task.yml
+        params:
+          PIVNET_TOKEN: ((public-pivnet-token))
+        privileged: true
+        tags:
+          - VMware
+        task: deploy-mountebank
+      - file: pks-releng-ci/tasks/extract-complex-secrets/task.yml
+        tags:
+          - VMware
+        task: extract-complex-secrets
+      - file: pks-releng-ci/tasks/generate-om-certificate/task.yml
+        privileged: true
+        tags:
+          - VMware
+        task: generate-om-certificate
+      - file: pks-releng-toolbox/tasks/get-stemcells/task.yml
+        image: ci-runner
+        tags:
+          - VMware
+        task: get-stemcells
+      - file: pks-releng-toolbox/tasks/configure-product/task.yml
+        image: ci-runner
+        privileged: true
+        tags:
+          - VMware
+        task: configure-product
+    serial: true
+  - name: apply-om-changes
+    on_failure:
+      do:
+        - params:
+            attachments:
+              - color: danger
+                text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+            channel: '#-dev-null'
+          put: notify
+          tags:
+            - VMware
+        - get: pipeline-metadata
+          tags:
+            - VMware
+        - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+          params:
+            GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+          tags:
+            - VMware
+          task: download-pks-cli
+        - file: pks-releng-ci/tasks/download-kubectl/task.yml
+          tags:
+            - VMware
+          task: download-kubectl
+        - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+          input_mapping:
+            tile: pks-untested-tile
+          tags:
+            - VMware
+          task: get-product-version-from-tile
+        - file: pks-releng-ci/tasks/gather-logs/task.yml
+          params:
+            ENV_LOCK_FILE: environment-lock/metadata
+            IAAS_TYPE: vsphere
+          privileged: true
+          tags:
+            - VMware
+          task: gather-logs
+        - params:
+            content_type: application/octet-stream
+            file: logs/*-logs.tar.gz
+          put: failure-logs
+          tags:
+            - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: pks-releng-ci
+            - get: p-pks-integrations
+            - get: pks-releng-toolbox
+            - get: pks-untested-tile
+              passed:
+                - configure-tile-in-om
+              trigger: true
+            - get: environment-lock
+              passed:
+                - configure-tile-in-om
+              tags:
+                - VMware
+              trigger: true
+            - get: ci-runner
+              tags:
+                - VMware
+      - file: pks-releng-toolbox/tasks/apply-changes/task.yml
+        image: ci-runner
+        privileged: true
+        tags:
+          - VMware
+        task: apply-changes
+    serial: true
+  - name: configure-uaa
+    on_failure:
+      do:
+        - params:
+            attachments:
+              - color: danger
+                text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+            channel: '#-dev-null'
+          put: notify
+          tags:
+            - VMware
+        - get: pipeline-metadata
+          tags:
+            - VMware
+        - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+          params:
+            GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+          tags:
+            - VMware
+          task: download-pks-cli
+        - file: pks-releng-ci/tasks/download-kubectl/task.yml
+          tags:
+            - VMware
+          task: download-kubectl
+        - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+          input_mapping:
+            tile: pks-untested-tile
+          tags:
+            - VMware
+          task: get-product-version-from-tile
+        - file: pks-releng-ci/tasks/gather-logs/task.yml
+          params:
+            ENV_LOCK_FILE: environment-lock/metadata
+            IAAS_TYPE: vsphere
+          privileged: true
+          tags:
+            - VMware
+          task: gather-logs
+        - params:
+            content_type: application/octet-stream
+            file: logs/*-logs.tar.gz
+          put: failure-logs
+          tags:
+            - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: pks-releng-ci
+            - get: p-pks-integrations
+            - get: kubo-odb-ci
+            - get: pks-untested-tile
+              passed:
+                - apply-om-changes
+              trigger: true
+            - get: environment-lock
+              passed:
+                - apply-om-changes
+              tags:
+                - VMware
+              trigger: true
+        tags:
+          - VMware
+      - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+        input_mapping:
+          tile: pks-untested-tile
+        tags:
+          - VMware
+        task: get-product-version-from-tile
+      - file: pks-releng-ci/tasks/setup-uaa/task.yml
+        privileged: true
+        tags:
+          - VMware
+        task: configure-uaa
+    serial: true
+  - name: create-cluster-2
+    on_failure:
+      do:
+        - params:
+            attachments:
+              - color: danger
+                text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+            channel: '#-dev-null'
+          put: notify
+          tags:
+            - VMware
+        - get: pipeline-metadata
+          tags:
+            - VMware
+        - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+          params:
+            GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+          tags:
+            - VMware
+          task: download-pks-cli
+        - file: pks-releng-ci/tasks/download-kubectl/task.yml
+          tags:
+            - VMware
+          task: download-kubectl
+        - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+          input_mapping:
+            tile: pks-untested-tile
+          tags:
+            - VMware
+          task: get-product-version-from-tile
+        - file: pks-releng-ci/tasks/gather-logs/task.yml
+          params:
+            ENV_LOCK_FILE: environment-lock/metadata
+            IAAS_TYPE: vsphere
+          privileged: true
+          tags:
+            - VMware
+          task: gather-logs
+        - params:
+            content_type: application/octet-stream
+            file: logs/*-logs.tar.gz
+          put: failure-logs
+          tags:
+            - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - configure-uaa
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - configure-uaa
+              tags:
+                - VMware
+              trigger: true
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            tags:
+              - VMware
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            tags:
+              - VMware
+            task: download-kubectl
+          - file: pks-releng-ci/tasks/create-cluster/task.yml
+            output_mapping:
+              cluster-info: cluster-2
+            privileged: true
+            tags:
+              - VMware
+            task: create-cluster
+          - params:
+              file: cluster-2/cluster-info-*.yml
+            put: cluster-2
+            tags:
+              - VMware
+        timeout: 2h
+    serial: true
+  - name: vrli-integrations-tests
+    on_failure:
+      in_parallel:
+        steps:
+          - do:
+              - params:
+                  attachments:
+                    - color: danger
+                      text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+                  channel: '#-dev-null'
+                put: notify
+                tags:
+                  - VMware
+              - get: pipeline-metadata
+                tags:
+                  - VMware
+              - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+                params:
+                  GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+                tags:
+                  - VMware
+                task: download-pks-cli
+              - file: pks-releng-ci/tasks/download-kubectl/task.yml
+                tags:
+                  - VMware
+                task: download-kubectl
+              - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+                input_mapping:
+                  tile: pks-untested-tile
+                tags:
+                  - VMware
+                task: get-product-version-from-tile
+              - file: pks-releng-ci/tasks/gather-logs/task.yml
+                params:
+                  ENV_LOCK_FILE: environment-lock/metadata
+                  IAAS_TYPE: vsphere
+                privileged: true
+                tags:
+                  - VMware
+                task: gather-logs
+              - params:
+                  content_type: application/octet-stream
+                  file: logs/*-logs.tar.gz
+                put: failure-logs
+                tags:
+                  - VMware
+          - params:
+              attachments:
+                - color: danger
+                  text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+              channel: '#-dev-null'
+            put: notify
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: pks-releng-toolbox
+              tags:
+                - VMware
+            - get: cluster-2
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+            - get: ci-runner
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            tags:
+              - VMware
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            tags:
+              - VMware
+            task: download-kubectl
+          - file: pks-releng-toolbox/tasks/run-vrli-release-tests/task.yml
+            image: ci-runner
+            input_mapping:
+              cluster: cluster-2
+              kubo-deployment: environment-lock
+              pks-lock: environment-lock
+              pks-release: environment-lock
+            params:
+              DEBUG: 1
+              DEPLOYMENT_NAME: vrli-deployment
+              NETWORK_AUTOMATION: true
+              PKS_CLI_PASSWORD: password
+              PKS_CLI_USERNAME: alana
+              TEST_ENVIRONMENT: PKS
+            privileged: true
+            tags:
+              - VMware
+            task: run-vrli-tests
+        timeout: 2h
+    serial: true
+  - name: wavefront-acceptance-tests
+    on_failure:
+      in_parallel:
+        steps:
+          - do:
+              - params:
+                  attachments:
+                    - color: danger
+                      text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+                  channel: '#-dev-null'
+                put: notify
+                tags:
+                  - VMware
+              - get: pipeline-metadata
+                tags:
+                  - VMware
+              - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+                params:
+                  GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+                tags:
+                  - VMware
+                task: download-pks-cli
+              - file: pks-releng-ci/tasks/download-kubectl/task.yml
+                tags:
+                  - VMware
+                task: download-kubectl
+              - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+                input_mapping:
+                  tile: pks-untested-tile
+                tags:
+                  - VMware
+                task: get-product-version-from-tile
+              - file: pks-releng-ci/tasks/gather-logs/task.yml
+                params:
+                  ENV_LOCK_FILE: environment-lock/metadata
+                  IAAS_TYPE: vsphere
+                privileged: true
+                tags:
+                  - VMware
+                task: gather-logs
+              - params:
+                  content_type: application/octet-stream
+                  file: logs/*-logs.tar.gz
+                put: failure-logs
+                tags:
+                  - VMware
+          - params:
+              attachments:
+                - color: danger
+                  text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+              channel: '#-dev-null'
+            put: notify
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - vrli-integrations-tests
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - vrli-integrations-tests
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: git-vmware-pks-ci
+              tags:
+                - VMware
+            - get: cluster-2
+              passed:
+                - vrli-integrations-tests
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            tags:
+              - VMware
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            tags:
+              - VMware
+            task: download-kubectl
+          - file: git-vmware-pks-ci/ci/tasks/run-wavefront-proxy-tests.yml
+            input_mapping:
+              cluster-info: cluster-2
+              git-pks-ci: git-vmware-pks-ci
+              kubo-deployment: environment-lock
+              pks-lock: environment-lock
+              pks-release: environment-lock
+            params:
+              DEBUG: 1
+              DEPLOYMENT_NAME: wavefront-deployment
+              NETWORK_AUTOMATION: true
+              PKS_CLI_PASSWORD: password
+              PKS_CLI_USERNAME: alana
+              TEST_ENVIRONMENT: PKS
+              WAVEFRONT_API_URL: ((wavefront-api-url))
+              WAVEFRONT_TOKEN: ((wavefront-token))
+            tags:
+              - VMware
+            task: wavefront-acceptance-tests
+          - config:
+              container_limits: {}
+              platform: linux
+              run:
+                args:
+                  - "1"
+                path: exit
+            image: ci-runner
+            tags:
+              - VMware
+            task: fail-this-job
+        timeout: 2h
+    serial: true
+  - name: vrops-acceptance-tests
+    on_failure:
+      in_parallel:
+        steps:
+          - do:
+              - params:
+                  attachments:
+                    - color: danger
+                      text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+                  channel: '#-dev-null'
+                put: notify
+                tags:
+                  - VMware
+              - get: pipeline-metadata
+                tags:
+                  - VMware
+              - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+                params:
+                  GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+                tags:
+                  - VMware
+                task: download-pks-cli
+              - file: pks-releng-ci/tasks/download-kubectl/task.yml
+                tags:
+                  - VMware
+                task: download-kubectl
+              - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+                input_mapping:
+                  tile: pks-untested-tile
+                tags:
+                  - VMware
+                task: get-product-version-from-tile
+              - file: pks-releng-ci/tasks/gather-logs/task.yml
+                params:
+                  ENV_LOCK_FILE: environment-lock/metadata
+                  IAAS_TYPE: vsphere
+                privileged: true
+                tags:
+                  - VMware
+                task: gather-logs
+              - params:
+                  content_type: application/octet-stream
+                  file: logs/*-logs.tar.gz
+                put: failure-logs
+                tags:
+                  - VMware
+          - params:
+              attachments:
+                - color: danger
+                  text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+              channel: '#-dev-null'
+            put: notify
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - wavefront-acceptance-tests
+              tags:
+                - VMware
+              trigger: true
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - wavefront-acceptance-tests
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: git-vmware-pks-ci
+              tags:
+                - VMware
+            - get: cluster-2
+              passed:
+                - wavefront-acceptance-tests
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            tags:
+              - VMware
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            tags:
+              - VMware
+            task: download-kubectl
+          - file: git-vmware-pks-ci/ci/tasks/run-vrops-release-tests.yml
+            input_mapping:
+              cluster-info: cluster-2
+              git-pks-ci: git-vmware-pks-ci
+              kubo-deployment: environment-lock
+              pks-lock: environment-lock
+              pks-release: environment-lock
+            params:
+              DEBUG: 1
+              DEPLOYMENT_NAME: vrops-deployment
+              NETWORK_AUTOMATION: true
+              PKS_CLI_PASSWORD: password
+              PKS_CLI_USERNAME: alana
+              TEST_ENVIRONMENT: PKS
+            tags:
+              - VMware
+            task: vrops-acceptance-tests
+        timeout: 2h
+    serial: true
+  - name: telemetry-acceptance-tests
+    on_failure:
+      in_parallel:
+        steps:
+          - do:
+              - params:
+                  attachments:
+                    - color: danger
+                      text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+                  channel: '#-dev-null'
+                put: notify
+                tags:
+                  - VMware
+              - get: pipeline-metadata
+                tags:
+                  - VMware
+              - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+                params:
+                  GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+                tags:
+                  - VMware
+                task: download-pks-cli
+              - file: pks-releng-ci/tasks/download-kubectl/task.yml
+                tags:
+                  - VMware
+                task: download-kubectl
+              - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+                input_mapping:
+                  tile: pks-untested-tile
+                tags:
+                  - VMware
+                task: get-product-version-from-tile
+              - file: pks-releng-ci/tasks/gather-logs/task.yml
+                params:
+                  ENV_LOCK_FILE: environment-lock/metadata
+                  IAAS_TYPE: vsphere
+                privileged: true
+                tags:
+                  - VMware
+                task: gather-logs
+              - params:
+                  content_type: application/octet-stream
+                  file: logs/*-logs.tar.gz
+                put: failure-logs
+                tags:
+                  - VMware
+          - params:
+              attachments:
+                - color: danger
+                  text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+              channel: '#-dev-null'
+            put: notify
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: cluster-2
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+            - get: kubo-odb-ci
+              tags:
+                - VMware
+            - get: git-vmware-pks-ci
+              tags:
+                - VMware
+            - get: git-pks-telemetry-release
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            tags:
+              - VMware
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            tags:
+              - VMware
+            task: download-kubectl
+          - file: git-pks-telemetry-release/ci/tasks/raas-acceptance-test.yml
+            input_mapping:
+              cluster-info-single: cluster-2
+            params:
+              GO111MODULE: auto
+              PKS_MYSQL_PORT: 3306
+            privileged: true
+            tags:
+              - VMware
+            task: run-telemetry-tests
+        timeout: 2h
+    serial: true
+  - name: sink-resources-acceptance-tests
+    on_failure:
+      in_parallel:
+        steps:
+          - do:
+              - params:
+                  attachments:
+                    - color: danger
+                      text: $BUILD_PIPELINE_NAME build failed. See results at <https://((ci_url))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME>
+                  channel: '#-dev-null'
+                put: notify
+                tags:
+                  - VMware
+              - get: pipeline-metadata
+                tags:
+                  - VMware
+              - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+                params:
+                  GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+                tags:
+                  - VMware
+                task: download-pks-cli
+              - file: pks-releng-ci/tasks/download-kubectl/task.yml
+                tags:
+                  - VMware
+                task: download-kubectl
+              - file: pks-releng-ci/tasks/get-product-version-from-tile/task.yml
+                input_mapping:
+                  tile: pks-untested-tile
+                tags:
+                  - VMware
+                task: get-product-version-from-tile
+              - file: pks-releng-ci/tasks/gather-logs/task.yml
+                params:
+                  ENV_LOCK_FILE: environment-lock/metadata
+                  IAAS_TYPE: vsphere
+                privileged: true
+                tags:
+                  - VMware
+                task: gather-logs
+              - params:
+                  content_type: application/octet-stream
+                  file: logs/*-logs.tar.gz
+                put: failure-logs
+                tags:
+                  - VMware
+    plan:
+      - in_parallel:
+          steps:
+            - get: environment-lock
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: pks-releng-ci
+              tags:
+                - VMware
+            - get: p-pks-integrations
+              tags:
+                - VMware
+            - get: pks-untested-tile
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+              trigger: true
+            - get: cluster-2
+              passed:
+                - create-cluster-2
+              tags:
+                - VMware
+            - get: git-sink-resources
+              tags:
+                - VMware
+      - do:
+          - file: pks-releng-ci/tasks/download-pks-cli/task.yml
+            params:
+              GCP_SERVICE_ACCOUNT_KEY: ((pks-releng-gcp-json))
+            task: download-pks-cli
+          - file: pks-releng-ci/tasks/download-kubectl/task.yml
+            task: download-kubectl
+          - file: pks-releng-ci/tasks/sink-resources-acceptance-tests/task.yml
+            input_mapping:
+              cluster-info: cluster-2
+              git-pks-releng-ci: pks-releng-ci
+              pks-lock: environment-lock
+            params:
+              DEBUG: null
+              ENV_LOCK_FILE: pks-lock/metadata
+              POLLING_COUNT: 12
+            privileged: true
+            tags:
+              - VMware
+            task: sink-resource-acceptance-tests
+        timeout: 2h
+    serial: true
+resource_types:
+  - name: cloudfoundry-bosh-deployment
+    source:
+      repository: cloudfoundry/bosh-deployment-resource
+      tag: v2.4.0
+    type: docker-image
+  - name: gcs-resource
+    source:
+      repository: frodenas/gcs-resource
+    type: docker-image
+  - name: meta
+    source:
+      repository: swce/metadata-resource
+    type: docker-image
+  - name: pcf-pool
+    source:
+      repository: cftoolsmiths/toolsmiths-envs-resource
+      tag: latest
+    type: docker-image
+  - name: pivnet
+    source:
+      repository: pivotalcf/pivnet-resource
+      tag: latest-final
+    type: docker-image
+  - name: pool-trigger
+    source:
+      repository: cfmobile/pool-trigger
+      tag: latest
+    type: docker-image
+  - name: shepherd
+    source:
+      repository: gcr.io/eminent-nation-87317/shepherd-resource
+      tag: latest
+    type: docker-image
+  - name: slack-notification
+    source:
+      repository: cfcommunity/slack-notification-resource
+      tag: latest
+    type: docker-image
+resources:
+  - check_every: 5m
+    name: ci-runner
+    source:
+      repository: pksrelengci/ci-runner
+      tag: 1.7.x
+    type: docker-image
+  - check_every: 5m
+    name: cluster-2
+    source:
+      bucket: dev-pks-releng-cluster-info
+      json_key: ((pks-releng-gcp-json))
+      regexp: cluster-info/.*.yml
+    type: gcs-resource
+  - check_every: 5m
+    name: environment-lock
+    source:
+      config:
+        namespace: releng
+        recipe:
+          data:
+            convert-lockfile: "true"
+            esx-build: "10884925"
+            nsx-edge-clusters: "4"
+            nsxt-build: ob-15008150
+            opsman-url: http://files.pks.eng.vmware.com/ci/artifacts/opsman/ops-manager-vsphere-2.8.2-build.203.ova
+            path: pks-dev-with-nsx-t
+            size-profile: releng-install
+            vc-build: ob-10964411
+            vrli: "true"
+            vrli-ip: 10.161.183.96
+            wavefront-alert-target: user@example.com
+            wavefront-api-url: ((wavefront-api-url))
+            wavefront-token: ((wavefront-token))
+          fetcher: git
+          launcher: vane
+          source: git@gitlab.eng.vmware.com:PKS/tooling/hack-nimbus.git
+          symbol: master
+      target: shepherd.run
+    tags:
+      - VMware
+    type: shepherd
+  - check_every: 5m
+    name: failure-logs
+    source:
+      bucket: dev-pks-env-failure-logs
+      json_key: ((pks-releng-gcp-json))
+      regexp: .*-logs.tar.gz
+    type: gcs-resource
+  - check_every: 5m
+    name: git-pks-telemetry-release
+    source:
+      branch: 2.0.0-build.424
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/pks-telemetry-release.git
+    type: git
+  - check_every: 5m
+    name: git-sink-resources
+    source:
+      branch: v1.0.1
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/sink-resources.git
+    type: git
+  - check_every: 5m
+    name: git-tile-pipeline
+    source:
+      branch: master
+      private_key: ((pks_releng_raas_key))
+      tag_filter: v3.1.1
+      uri: git@github.com:pivotal-cf/pcf-tile-pipeline.git
+    type: git
+  - check_every: 5m
+    name: git-vmware-pks-ci
+    source:
+      branch: master
+      private_key: ((vmware_github_ssh_key))
+      uri: git@github.com:vmware/pks-ci.git
+    type: git
+  - check_every: 5m
+    name: kubo-odb-ci
+    source:
+      branch: master
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/kubo-odb-ci.git
+    type: git
+  - check_every: 5m
+    name: notify
+    source:
+      url: ((slack-webhook))
+    type: slack-notification
+  - check_every: 5m
+    name: pipeline-metadata
+    source: null
+    type: meta
+  - check_every: 5m
+    name: pks-releng-ci
+    source:
+      branch: stable-branch-1.7.x
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/pks-releng-ci.git
+    type: git
+  - check_every: 5m
+    name: pks-releng-toolbox
+    source:
+      branch: master
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/pks-releng-toolbox.git
+    type: git
+  - check_every: 5m
+    name: pks-untested-tile
+    source:
+      bucket: dev-pks-tile-integrations
+      json_key: ((pks-releng-gcp-json))
+      regexp: 1.7.x/pivotal-container-service-(.*).pivotal
+    type: gcs-resource
+  - check_every: 5m
+    name: p-pks-integrations
+    source:
+      branch: master
+      private_key: ((pks_releng_raas_key))
+      uri: git@github.com:pivotal-cf/p-pks-integrations.git
+    type: git
