@@ -3,6 +3,8 @@ package playground
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
+import net.mikolak.travesty
+import net.mikolak.travesty.OutputFormat
 import scala.concurrent.ExecutionContext.global
 import scala.concurrent.Future
 
@@ -23,9 +25,18 @@ object Concourse extends App {
     }
   }
 
-  val input = Source.single(Blueprint("1"))
-  val claimShepherdLock = Flow[Blueprint].mapAsync(2)(callShepForLock)
+  val input = Source.single(Blueprint("1")).named("blueprint")
+  val claimShepherdLock = Flow[Blueprint].mapAsync(2)(callShepForLock).named("shepherd")
+  val sinkIgnore = Sink.ignore.named("end")
 
-  val g = input.via(claimShepherdLock).to(Sink.foreach(println))
+  val g = input.via(claimShepherdLock).to(sinkIgnore)
+
+  //render as image to file, PNG is supported as well
+  travesty.toFile(g, OutputFormat.SVG)("target/stream.svg")
+
+  //render as text "image"
+  system.log.info(travesty.toString(g)) //take care NOT to wrap the text
+
+
   g.run
 }
